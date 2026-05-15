@@ -8,6 +8,7 @@ import com.stocklab.core.domain.matching.repository.OrderBookRedisRepository;
 import com.stocklab.core.domain.order.Order;
 import com.stocklab.core.domain.order.OrderSide;
 import com.stocklab.core.domain.order.event.OrderEvent;
+import com.stocklab.core.domain.order.messaging.OrderEventPublisher;
 import com.stocklab.core.domain.order.repository.OrderRepository;
 import com.stocklab.core.domain.portfolio.Portfolio;
 import com.stocklab.core.domain.portfolio.UserStock;
@@ -17,7 +18,6 @@ import com.stocklab.core.domain.stock.Stock;
 import com.stocklab.core.domain.stock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cloud.stream.function.StreamBridge;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,7 +35,7 @@ public class OrderService {
     private final UserStockRepository userStockRepository;
     private final OrderBookRedisRepository orderBookRedisRepository;
     private final ReservationReleaseService reservationReleaseService;
-    private final StreamBridge streamBridge;
+    private final OrderEventPublisher orderEventPublisher;
 
     @DistributedLock(key = "#request.userId")
     @Transactional
@@ -82,7 +82,7 @@ public class OrderService {
                 .quantity(savedOrder.getQuantity())
                 .build();
 
-        boolean sent = streamBridge.send("orders-out-0", event);
+        boolean sent = orderEventPublisher.publish(event);
         if (!sent) {
             log.error("Failed to send order event to Kafka: {}", event.getOrderId());
             throw new RuntimeException("Kafka message delivery failed");

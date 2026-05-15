@@ -5,7 +5,6 @@ import com.stocklab.core.domain.matching.repository.ExecutionRepository;
 import com.stocklab.core.domain.matching.repository.OrderBookRedisRepository;
 import com.stocklab.core.domain.order.Order;
 import com.stocklab.core.domain.order.OrderSide;
-import com.stocklab.core.domain.order.OrderStatus;
 import com.stocklab.core.domain.order.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -69,13 +68,8 @@ public class MatchingService {
 
         executionRepository.save(execution);
 
-        // Update Redis if fully filled
-        if (buyOrder.getStatus() == OrderStatus.COMPLETED) {
-            orderBookRedisRepository.removeOrder(stockCode, "BUY", buyOrderId);
-        }
-        if (sellOrder.getStatus() == OrderStatus.COMPLETED) {
-            orderBookRedisRepository.removeOrder(stockCode, "SELL", sellOrderId);
-        }
+        orderBookRedisRepository.syncOrderInBook(stockCode, buyOrder);
+        orderBookRedisRepository.syncOrderInBook(stockCode, sellOrder);
 
         log.info("Match Executed: Stock={}, Price={}, Qty={}, BuyOrder={}, SellOrder={}",
                 stockCode, matchPrice, matchQuantity, buyOrderId, sellOrderId);

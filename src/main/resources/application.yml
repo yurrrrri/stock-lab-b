@@ -34,6 +34,8 @@ spring:
 
   # Kafka (Spring Cloud Stream)
   cloud:
+    function:
+      definition: consumeOrder
     stream:
       kafka:
         binder:
@@ -41,9 +43,11 @@ spring:
       bindings:
         orders-out-0:
           destination: order-topic
-        orders-in-0:
+        consumeOrder-in-0:
           destination: order-topic
           group: matching-engine-group
+          consumer:
+            concurrency: 1
 
 server:
   port: 8080

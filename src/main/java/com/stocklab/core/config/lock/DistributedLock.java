@@ -20,9 +20,10 @@ public @interface DistributedLock {
     long waitTime() default 5L;
 
     /**
-     * Time to hold the lock before automatic release
+     * Time to hold the lock before automatic release.
+     * Use -1 to enable Redisson watchdog renewal until the method completes.
      */
-    long leaseTime() default 3L;
+    long leaseTime() default -1L;
 
     /**
      * Time unit

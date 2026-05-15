@@ -17,7 +17,9 @@ import java.lang.reflect.Method;
 @RequiredArgsConstructor
 @Slf4j
 public class DistributedLockAspect {
+
     private static final String LOCK_PREFIX = "LOCK:";
+
     private final RedissonClient redissonClient;
 
     @Around("@annotation(com.stocklab.core.config.lock.DistributedLock)")
@@ -26,23 +28,30 @@ public class DistributedLockAspect {
         Method method = signature.getMethod();
         DistributedLock distributedLock = method.getAnnotation(DistributedLock.class);
 
-        String key = LOCK_PREFIX + CustomSpringELParser.getDynamicValue(signature.getParameterNames(), joinPoint.getArgs(), distributedLock.key());
-        RLock rLock = redissonClient.getLock(key);
+        String lockKey = LOCK_PREFIX + CustomSpringELParser.getDynamicValue(
+                signature.getParameterNames(),
+                joinPoint.getArgs(),
+                distributedLock.key()
+        );
+        RLock rLock = redissonClient.getLock(lockKey);
 
+        boolean lockAcquired = false;
         try {
-            boolean available = rLock.tryLock(distributedLock.waitTime(), distributedLock.leaseTime(), distributedLock.timeUnit());
-            if (!available) {
-                return false;
+            lockAcquired = rLock.tryLock(
+                    distributedLock.waitTime(),
+                    distributedLock.leaseTime(),
+                    distributedLock.timeUnit()
+            );
+            if (!lockAcquired) {
+                throw new DistributedLockAcquisitionException(lockKey);
             }
-
             return joinPoint.proceed();
         } catch (InterruptedException e) {
-            throw new RuntimeException("Lock acquisition interrupted", e);
+            Thread.currentThread().interrupt();
+            throw new DistributedLockAcquisitionException(lockKey);
         } finally {
-            try {
+            if (lockAcquired && rLock.isHeldByCurrentThread()) {
                 rLock.unlock();
-            } catch (IllegalMonitorStateException e) {
-                log.info("Redisson Lock already released");
             }
         }
     }
