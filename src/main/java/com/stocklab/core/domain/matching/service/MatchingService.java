@@ -24,6 +24,7 @@ public class MatchingService {
     private final OrderBookRedisRepository orderBookRedisRepository;
     private final SettlementService settlementService;
     private final ExecutionNotificationService executionNotificationService;
+    private final MatchIdempotencyService matchIdempotencyService;
 
     @Transactional
     public void processMatch(String stockCode, Long buyOrderId, Long sellOrderId, BigDecimal matchPrice) {
@@ -51,6 +52,11 @@ public class MatchingService {
             return;
         }
         BigDecimal matchQuantity = buyRemaining.min(sellRemaining);
+
+        if (!matchIdempotencyService.tryAcquire(buyOrder, sellOrder)) {
+            log.warn("Skipping duplicate match attempt: buy={}, sell={}", buyOrderId, sellOrderId);
+            return;
+        }
 
         // Update Orders
         buyOrder.fill(matchQuantity);

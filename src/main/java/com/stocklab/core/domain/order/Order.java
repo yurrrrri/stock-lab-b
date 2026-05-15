@@ -56,6 +56,9 @@ public class Order extends BaseTimeEntity {
     @Column(nullable = false)
     private OrderStatus status;
 
+    @Version
+    private Long version;
+
     @Builder
     public Order(User user, Stock stock, OrderType orderType, OrderSide orderSide, 
                  BigDecimal price, BigDecimal quantity) {

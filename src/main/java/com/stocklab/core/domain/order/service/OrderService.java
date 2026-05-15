@@ -2,15 +2,14 @@ package com.stocklab.core.domain.order.service;
 
 import com.stocklab.core.api.dto.OrderRequest;
 import com.stocklab.core.api.exception.AccessDeniedException;
-import com.stocklab.core.api.exception.MessagingException;
 import com.stocklab.core.config.lock.DistributedLock;
+import com.stocklab.core.domain.outbox.service.OutboxService;
 import com.stocklab.core.domain.auth.User;
 import com.stocklab.core.domain.auth.repository.UserRepository;
 import com.stocklab.core.domain.matching.repository.OrderBookRedisRepository;
 import com.stocklab.core.domain.order.Order;
 import com.stocklab.core.domain.order.OrderSide;
 import com.stocklab.core.domain.order.event.OrderEvent;
-import com.stocklab.core.domain.order.messaging.OrderEventPublisher;
 import com.stocklab.core.domain.order.repository.OrderRepository;
 import com.stocklab.core.domain.portfolio.Portfolio;
 import com.stocklab.core.domain.portfolio.UserStock;
@@ -37,7 +36,7 @@ public class OrderService {
     private final UserStockRepository userStockRepository;
     private final OrderBookRedisRepository orderBookRedisRepository;
     private final ReservationReleaseService reservationReleaseService;
-    private final OrderEventPublisher orderEventPublisher;
+    private final OutboxService outboxService;
     private final MarketOrderPriceResolver marketOrderPriceResolver;
 
     @DistributedLock(key = "#authenticatedUserId")
@@ -91,11 +90,7 @@ public class OrderService {
                 .quantity(savedOrder.getQuantity())
                 .build();
 
-        boolean sent = orderEventPublisher.publish(event);
-        if (!sent) {
-            log.error("Failed to send order event to Kafka: {}", event.getOrderId());
-            throw new MessagingException("Kafka message delivery failed");
-        }
+        outboxService.enqueueOrderPlaced(event);
 
         return savedOrder.getOrderId();
     }

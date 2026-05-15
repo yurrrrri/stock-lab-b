@@ -1,7 +1,7 @@
 package com.stocklab.core.domain.matching.consumer;
 
-import com.stocklab.core.domain.matching.service.MatchingEngineService;
 import com.stocklab.core.domain.order.event.OrderEvent;
+import com.stocklab.core.domain.order.service.OrderEventProcessor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
@@ -14,13 +14,13 @@ import java.util.function.Consumer;
 @RequiredArgsConstructor
 public class OrderConsumer {
 
-    private final MatchingEngineService matchingEngineService;
+    private final OrderEventProcessor orderEventProcessor;
 
     @Bean
     public Consumer<OrderEvent> consumeOrder() {
         return event -> {
             log.info("Received order event: orderId={}, stock={}", event.getOrderId(), event.getStockCode());
-            matchingEngineService.handleOrderEvent(event);
+            orderEventProcessor.process(event);
         };
     }
 }

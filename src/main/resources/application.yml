@@ -97,3 +97,7 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+
+stocklab:
+  outbox:
+    poll-interval-ms: 1000
