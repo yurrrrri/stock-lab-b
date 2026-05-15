@@ -8,11 +8,14 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
 
 @Aspect
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @Component
 @RequiredArgsConstructor
 @Slf4j

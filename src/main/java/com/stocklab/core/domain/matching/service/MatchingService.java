@@ -11,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 
@@ -75,13 +77,17 @@ public class MatchingService {
                 .build();
 
         Execution savedExecution = executionRepository.save(execution);
-        executionNotificationService.publish(savedExecution);
-
         orderBookRedisRepository.syncOrderInBook(stockCode, buyOrder);
         orderBookRedisRepository.syncOrderInBook(stockCode, sellOrder);
 
-        log.info("Match Executed: Stock={}, Price={}, Qty={}, BuyOrder={}, SellOrder={}",
-                stockCode, matchPrice, matchQuantity, buyOrderId, sellOrderId);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                executionNotificationService.publish(savedExecution);
+                log.info("Match Executed and Committed: Stock={}, Price={}, Qty={}, BuyOrder={}, SellOrder={}",
+                        stockCode, matchPrice, matchQuantity, buyOrderId, sellOrderId);
+            }
+        });
     }
 
     private Order loadOrderForUpdate(Long orderId) {

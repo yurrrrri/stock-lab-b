@@ -63,9 +63,18 @@ public class Portfolio {
         if (frozenBalance.compareTo(reservedAmount) < 0) {
             throw new IllegalStateException("Insufficient frozen cash for settlement");
         }
+
         this.frozenBalance = this.frozenBalance.subtract(reservedAmount);
-        BigDecimal refund = reservedAmount.subtract(actualCost);
-        if (refund.compareTo(BigDecimal.ZERO) > 0) {
+
+        if (actualCost.compareTo(reservedAmount) > 0) {
+            BigDecimal extraCost = actualCost.subtract(reservedAmount);
+            if (cashBalance.compareTo(extraCost) < 0) {
+                // In a real system, this might lead to a margin call or overdraft
+                throw new IllegalStateException("Insufficient cash balance for price slippage");
+            }
+            this.cashBalance = this.cashBalance.subtract(extraCost);
+        } else {
+            BigDecimal refund = reservedAmount.subtract(actualCost);
             this.cashBalance = this.cashBalance.add(refund);
         }
     }

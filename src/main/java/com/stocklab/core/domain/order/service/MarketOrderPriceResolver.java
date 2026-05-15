@@ -20,9 +20,16 @@ public class MarketOrderPriceResolver {
             return limitPrice;
         }
 
-        return orderBookRedisRepository.getBestOppositePrice(stockCode, orderSide)
+        BigDecimal bestOppositePrice = orderBookRedisRepository.getBestOppositePrice(stockCode, orderSide)
                 .orElseThrow(() -> new NoLiquidityException(
                         "No opposite-side liquidity for market order on stock: " + stockCode
                 ));
+
+        if (orderSide == OrderSide.BUY) {
+            // Apply 5% buffer for market buy orders to handle slippage
+            return bestOppositePrice.multiply(BigDecimal.valueOf(1.05));
+        }
+
+        return bestOppositePrice;
     }
 }
