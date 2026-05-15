@@ -16,5 +16,5 @@ bin/
 .DS_Store
 Thumbs.db
 
-# Sensitive configuration files
-application-key.yml
+# Sensitive configuration files (see src/main/resources/application-key.example.yml)
+**/application-key.yml

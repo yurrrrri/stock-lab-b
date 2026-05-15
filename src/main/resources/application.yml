@@ -1,6 +1,8 @@
 spring:
   profiles:
-    active: key
+    # local: committed defaults + docker-compose (see application-local.yml)
+    # key:   optional secrets in gitignored application-key.yml (see application-key.example.yml)
+    active: local
 
   application:
     name: stock-lab
@@ -37,17 +39,35 @@ spring:
     function:
       definition: consumeOrder
     stream:
+      default:
+        content-type: application/json
       kafka:
         binder:
           brokers: localhost:9092
+          auto-create-topics: true
+          min-partition-count: 8
+          configuration:
+            spring.json.trusted.packages: com.stocklab.core.domain.order.event
+        bindings:
+          orders-out-0:
+            producer:
+              configuration:
+                acks: all
+          consumeOrder-in-0:
+            consumer:
+              configuration:
+                isolation.level: read_committed
       bindings:
         orders-out-0:
           destination: order-topic
+          producer:
+            partition-count: 8
         consumeOrder-in-0:
           destination: order-topic
           group: matching-engine-group
           consumer:
             concurrency: 1
+            max-attempts: 3
 
 server:
   port: 8080
@@ -64,6 +84,16 @@ management:
     web:
       exposure:
         include: health, info, metrics, prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
   metrics:
     tags:
       application: ${spring.application.name}

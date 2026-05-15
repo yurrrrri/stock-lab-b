@@ -1,0 +1,16 @@
+# Copy this file to application-key.yml (gitignored) and activate the "key" profile when needed.
+# Example: java -jar app.jar --spring.profiles.active=key
+#
+# spring:
+#   datasource:
+#     url: jdbc:postgresql://localhost:5432/stock_lab
+#     username: your_username
+#     password: your_password
+#     driver-class-name: org.postgresql.Driver
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/stock_lab
+    username: admin
+    password: password
+    driver-class-name: org.postgresql.Driver
