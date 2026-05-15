@@ -14,7 +14,7 @@ import java.math.BigDecimal;
 @Table(name = "portfolios")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@Check(constraints = "cash_balance >= 0")
+@Check(constraints = "cash_balance >= 0 AND frozen_balance >= 0")
 public class Portfolio {
 
     @Id
@@ -28,16 +28,70 @@ public class Portfolio {
     @Column(nullable = false, precision = 18, scale = 4)
     private BigDecimal cashBalance;
 
+    @Column(nullable = false, precision = 18, scale = 4)
+    private BigDecimal frozenBalance;
+
     @Builder
     public Portfolio(User user, BigDecimal cashBalance) {
         this.user = user;
         this.cashBalance = cashBalance != null ? cashBalance : BigDecimal.ZERO;
+        this.frozenBalance = BigDecimal.ZERO;
     }
-    
+
+    public BigDecimal getAvailableCash() {
+        return cashBalance;
+    }
+
+    public void freezeCash(BigDecimal amount) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Freeze amount must be positive");
+        }
+        if (cashBalance.compareTo(amount) < 0) {
+            throw new IllegalStateException("Insufficient cash balance");
+        }
+        this.cashBalance = this.cashBalance.subtract(amount);
+        this.frozenBalance = this.frozenBalance.add(amount);
+    }
+
+    /**
+     * Deducts a buy-order reservation from frozen cash and refunds any amount reserved above the actual fill price.
+     */
+    public void settleBuyReservation(BigDecimal reservedAmount, BigDecimal actualCost) {
+        if (reservedAmount.compareTo(BigDecimal.ZERO) <= 0 || actualCost.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Settlement amounts must be positive");
+        }
+        if (frozenBalance.compareTo(reservedAmount) < 0) {
+            throw new IllegalStateException("Insufficient frozen cash for settlement");
+        }
+        this.frozenBalance = this.frozenBalance.subtract(reservedAmount);
+        BigDecimal refund = reservedAmount.subtract(actualCost);
+        if (refund.compareTo(BigDecimal.ZERO) > 0) {
+            this.cashBalance = this.cashBalance.add(refund);
+        }
+    }
+
+    public void unfreezeCash(BigDecimal amount) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Unfreeze amount must be positive");
+        }
+        if (frozenBalance.compareTo(amount) < 0) {
+            throw new IllegalStateException("Insufficient frozen cash to unfreeze");
+        }
+        this.frozenBalance = this.frozenBalance.subtract(amount);
+        this.cashBalance = this.cashBalance.add(amount);
+    }
+
+    public void receiveSaleProceeds(BigDecimal amount) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Proceeds must be positive");
+        }
+        this.cashBalance = this.cashBalance.add(amount);
+    }
+
     public void deposit(BigDecimal amount) {
         this.cashBalance = this.cashBalance.add(amount);
     }
-    
+
     public void withdraw(BigDecimal amount) {
         if (this.cashBalance.compareTo(amount) < 0) {
             throw new IllegalStateException("Insufficient cash balance");

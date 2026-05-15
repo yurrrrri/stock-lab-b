@@ -78,9 +78,17 @@ public class Order extends BaseTimeEntity {
         }
     }
 
+    public BigDecimal getRemainingQuantity() {
+        return this.quantity.subtract(this.filledQuantity);
+    }
+
+    public boolean isCancelable() {
+        return this.status == OrderStatus.PENDING || this.status == OrderStatus.PARTIAL;
+    }
+
     public void cancel() {
-        if (this.status == OrderStatus.COMPLETED) {
-            throw new IllegalStateException("Cannot cancel a completed order");
+        if (!isCancelable()) {
+            throw new IllegalStateException("Cannot cancel order in status: " + this.status);
         }
         this.status = OrderStatus.CANCELED;
     }

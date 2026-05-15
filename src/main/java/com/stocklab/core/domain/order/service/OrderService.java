@@ -4,12 +4,15 @@ import com.stocklab.core.api.dto.OrderRequest;
 import com.stocklab.core.config.lock.DistributedLock;
 import com.stocklab.core.domain.auth.User;
 import com.stocklab.core.domain.auth.repository.UserRepository;
+import com.stocklab.core.domain.matching.repository.OrderBookRedisRepository;
 import com.stocklab.core.domain.order.Order;
 import com.stocklab.core.domain.order.OrderSide;
 import com.stocklab.core.domain.order.event.OrderEvent;
 import com.stocklab.core.domain.order.repository.OrderRepository;
 import com.stocklab.core.domain.portfolio.Portfolio;
+import com.stocklab.core.domain.portfolio.UserStock;
 import com.stocklab.core.domain.portfolio.repository.PortfolioRepository;
+import com.stocklab.core.domain.portfolio.repository.UserStockRepository;
 import com.stocklab.core.domain.stock.Stock;
 import com.stocklab.core.domain.stock.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +32,9 @@ public class OrderService {
     private final UserRepository userRepository;
     private final StockRepository stockRepository;
     private final PortfolioRepository portfolioRepository;
+    private final UserStockRepository userStockRepository;
+    private final OrderBookRedisRepository orderBookRedisRepository;
+    private final ReservationReleaseService reservationReleaseService;
     private final StreamBridge streamBridge;
 
     @DistributedLock(key = "#request.userId")
@@ -39,17 +45,18 @@ public class OrderService {
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
         Stock stock = stockRepository.findById(request.getStockCode())
                 .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
-        Portfolio portfolio = portfolioRepository.findByUserId(request.getUserId())
+        Portfolio portfolio = portfolioRepository.findByUserIdForUpdate(request.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("Portfolio not found"));
 
-        // 2. 가용 잔고 검증 (매수 시)
+        // 2. 가용 자원 예약 (매수: 현금 동결, 매도: 보유 수량 동결)
         if (request.getOrderSide() == OrderSide.BUY) {
-            BigDecimal requiredAmount = request.getPrice().multiply(request.getQuantity());
-            if (portfolio.getCashBalance().compareTo(requiredAmount) < 0) {
-                throw new IllegalStateException("Insufficient cash balance");
-            }
-            // 실제 차감은 체결 시점에 하거나, 주문 시점에 예약(Freeze) 처리를 할 수 있으나 
-            // 여기서는 단순 가검증 후 진행합니다.
+            BigDecimal reserveAmount = request.getPrice().multiply(request.getQuantity());
+            portfolio.freezeCash(reserveAmount);
+        } else {
+            UserStock userStock = userStockRepository
+                    .findByUserIdAndStockCodeForUpdate(request.getUserId(), request.getStockCode())
+                    .orElseThrow(() -> new IllegalStateException("Insufficient stock quantity"));
+            userStock.freezeQuantity(request.getQuantity());
         }
 
         // 3. 주문 저장 (DB - PENDING 상태)
@@ -82,5 +89,30 @@ public class OrderService {
         }
 
         return savedOrder.getOrderId();
+    }
+
+    @DistributedLock(key = "#userId")
+    @Transactional
+    public void cancelOrder(Long orderId, Long userId) {
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
+
+        if (!order.getUser().getId().equals(userId)) {
+            throw new IllegalArgumentException("Order does not belong to user: " + userId);
+        }
+        if (!order.isCancelable()) {
+            throw new IllegalStateException("Order cannot be canceled in status: " + order.getStatus());
+        }
+
+        reservationReleaseService.releaseRemaining(order);
+        order.cancel();
+
+        orderBookRedisRepository.removeOrder(
+                order.getStock().getStockCode(),
+                order.getOrderSide().name(),
+                order.getOrderId()
+        );
+
+        log.info("Order canceled: orderId={}, userId={}", orderId, userId);
     }
 }

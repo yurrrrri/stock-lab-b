@@ -20,7 +20,7 @@ import java.math.BigDecimal;
 )
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@Check(constraints = "quantity >= 0")
+@Check(constraints = "quantity >= 0 AND frozen_quantity >= 0 AND frozen_quantity <= quantity")
 public class UserStock {
 
     @Id
@@ -39,6 +39,9 @@ public class UserStock {
     private BigDecimal quantity;
 
     @Column(nullable = false, precision = 18, scale = 4)
+    private BigDecimal frozenQuantity;
+
+    @Column(nullable = false, precision = 18, scale = 4)
     private BigDecimal averagePrice;
 
     @Builder
@@ -46,7 +49,43 @@ public class UserStock {
         this.user = user;
         this.stock = stock;
         this.quantity = quantity != null ? quantity : BigDecimal.ZERO;
+        this.frozenQuantity = BigDecimal.ZERO;
         this.averagePrice = averagePrice != null ? averagePrice : BigDecimal.ZERO;
+    }
+
+    public BigDecimal getAvailableQuantity() {
+        return quantity.subtract(frozenQuantity);
+    }
+
+    public void freezeQuantity(BigDecimal amount) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Freeze quantity must be positive");
+        }
+        if (getAvailableQuantity().compareTo(amount) < 0) {
+            throw new IllegalStateException("Insufficient stock quantity");
+        }
+        this.frozenQuantity = this.frozenQuantity.add(amount);
+    }
+
+    public void unfreezeQuantity(BigDecimal amount) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Unfreeze quantity must be positive");
+        }
+        if (frozenQuantity.compareTo(amount) < 0) {
+            throw new IllegalStateException("Insufficient frozen stock to unfreeze");
+        }
+        this.frozenQuantity = this.frozenQuantity.subtract(amount);
+    }
+
+    public void settleSellReservation(BigDecimal amount) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Settlement quantity must be positive");
+        }
+        if (frozenQuantity.compareTo(amount) < 0) {
+            throw new IllegalStateException("Insufficient frozen stock for settlement");
+        }
+        this.frozenQuantity = this.frozenQuantity.subtract(amount);
+        this.quantity = this.quantity.subtract(amount);
     }
     
     public void addQuantity(BigDecimal amount, BigDecimal price) {
