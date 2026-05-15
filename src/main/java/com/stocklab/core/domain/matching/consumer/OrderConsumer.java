@@ -1,12 +1,16 @@
 package com.stocklab.core.domain.matching.consumer;
 
 import com.stocklab.core.domain.matching.repository.OrderBookRedisRepository;
+import com.stocklab.core.domain.matching.service.MatchingService;
 import com.stocklab.core.domain.order.event.OrderEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.ZSetOperations;
 
+import java.math.BigDecimal;
+import java.util.Set;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -15,6 +19,7 @@ import java.util.function.Consumer;
 public class OrderConsumer {
 
     private final OrderBookRedisRepository orderBookRedisRepository;
+    private final MatchingService matchingService;
 
     /**
      * Kafka Consumer for Order Events.
@@ -40,9 +45,36 @@ public class OrderConsumer {
 
     private void match(String stockCode) {
         log.info("Triggering Matching Engine for stock: {}", stockCode);
-        // TODO: 매수/매도 호가를 비교하여 체결 처리 로직 구현
-        // 1. BUY ZSET의 최고가와 SELL ZSET의 최저가 비교
-        // 2. BUY Price >= SELL Price 이면 체결(Execution) 생성
-        // 3. 체결 완료 시 Redis 및 DB 업데이트
+        
+        while (true) {
+            Set<ZSetOperations.TypedTuple<String>> bestBuy = orderBookRedisRepository.getBestBuyOrders(stockCode, 1);
+            Set<ZSetOperations.TypedTuple<String>> bestSell = orderBookRedisRepository.getBestSellOrders(stockCode, 1);
+
+            if (bestBuy == null || bestBuy.isEmpty() || bestSell == null || bestSell.isEmpty()) {
+                break;
+            }
+
+            ZSetOperations.TypedTuple<String> buyEntry = bestBuy.iterator().next();
+            ZSetOperations.TypedTuple<String> sellEntry = bestSell.iterator().next();
+
+            if (buyEntry.getScore() == null || sellEntry.getScore() == null) {
+                break;
+            }
+
+            BigDecimal buyPrice = BigDecimal.valueOf(buyEntry.getScore());
+            BigDecimal sellPrice = BigDecimal.valueOf(sellEntry.getScore());
+
+            // BUY Price >= SELL Price 이면 체결
+            if (buyPrice.compareTo(sellPrice) >= 0) {
+                Long buyOrderId = Long.valueOf(buyEntry.getValue());
+                Long sellOrderId = Long.valueOf(sellEntry.getValue());
+
+                // 체결 가격은 보통 호가창에 먼저 등록된 주문(Maker)의 가격을 따름
+                // 여기서는 간단히 매도 호가(Sell Price)를 체결가로 설정
+                matchingService.processMatch(stockCode, buyOrderId, sellOrderId, sellPrice);
+            } else {
+                break;
+            }
+        }
     }
 }
