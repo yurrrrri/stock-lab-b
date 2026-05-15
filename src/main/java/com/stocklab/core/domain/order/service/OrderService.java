@@ -1,6 +1,8 @@
 package com.stocklab.core.domain.order.service;
 
 import com.stocklab.core.api.dto.OrderRequest;
+import com.stocklab.core.api.exception.AccessDeniedException;
+import com.stocklab.core.api.exception.MessagingException;
 import com.stocklab.core.config.lock.DistributedLock;
 import com.stocklab.core.domain.auth.User;
 import com.stocklab.core.domain.auth.repository.UserRepository;
@@ -36,21 +38,30 @@ public class OrderService {
     private final OrderBookRedisRepository orderBookRedisRepository;
     private final ReservationReleaseService reservationReleaseService;
     private final OrderEventPublisher orderEventPublisher;
+    private final MarketOrderPriceResolver marketOrderPriceResolver;
 
-    @DistributedLock(key = "#request.userId")
+    @DistributedLock(key = "#authenticatedUserId")
     @Transactional
-    public Long placeOrder(OrderRequest request) {
-        // 1. 가용 자원 검증 (User, Stock, Portfolio)
+    public Long placeOrder(Long authenticatedUserId, OrderRequest request) {
+        assertMatchingUser(authenticatedUserId, request.getUserId());
+
         User user = userRepository.findById(request.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
         Stock stock = stockRepository.findById(request.getStockCode())
                 .orElseThrow(() -> new IllegalArgumentException("Stock not found"));
+
+        BigDecimal effectivePrice = marketOrderPriceResolver.resolve(
+                request.getStockCode(),
+                request.getOrderType(),
+                request.getOrderSide(),
+                request.getPrice()
+        );
+
         Portfolio portfolio = portfolioRepository.findByUserIdForUpdate(request.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("Portfolio not found"));
 
-        // 2. 가용 자원 예약 (매수: 현금 동결, 매도: 보유 수량 동결)
         if (request.getOrderSide() == OrderSide.BUY) {
-            BigDecimal reserveAmount = request.getPrice().multiply(request.getQuantity());
+            BigDecimal reserveAmount = effectivePrice.multiply(request.getQuantity());
             portfolio.freezeCash(reserveAmount);
         } else {
             UserStock userStock = userStockRepository
@@ -59,19 +70,17 @@ public class OrderService {
             userStock.freezeQuantity(request.getQuantity());
         }
 
-        // 3. 주문 저장 (DB - PENDING 상태)
         Order order = Order.builder()
                 .user(user)
                 .stock(stock)
                 .orderType(request.getOrderType())
                 .orderSide(request.getOrderSide())
-                .price(request.getPrice())
+                .price(effectivePrice)
                 .quantity(request.getQuantity())
                 .build();
-        
+
         Order savedOrder = orderRepository.save(order);
 
-        // 4. Kafka 이벤트 발행 (비동기 파이프라인 시작)
         OrderEvent event = OrderEvent.builder()
                 .orderId(savedOrder.getOrderId())
                 .userId(user.getId())
@@ -85,20 +94,20 @@ public class OrderService {
         boolean sent = orderEventPublisher.publish(event);
         if (!sent) {
             log.error("Failed to send order event to Kafka: {}", event.getOrderId());
-            throw new RuntimeException("Kafka message delivery failed");
+            throw new MessagingException("Kafka message delivery failed");
         }
 
         return savedOrder.getOrderId();
     }
 
-    @DistributedLock(key = "#userId")
+    @DistributedLock(key = "#authenticatedUserId")
     @Transactional
-    public void cancelOrder(Long orderId, Long userId) {
+    public void cancelOrder(Long orderId, Long authenticatedUserId) {
         Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new IllegalArgumentException("Order not found: " + orderId));
 
-        if (!order.getUser().getId().equals(userId)) {
-            throw new IllegalArgumentException("Order does not belong to user: " + userId);
+        if (!order.getUser().getId().equals(authenticatedUserId)) {
+            throw new AccessDeniedException("Order does not belong to authenticated user");
         }
         if (!order.isCancelable()) {
             throw new IllegalStateException("Order cannot be canceled in status: " + order.getStatus());
@@ -113,6 +122,12 @@ public class OrderService {
                 order.getOrderId()
         );
 
-        log.info("Order canceled: orderId={}, userId={}", orderId, userId);
+        log.info("Order canceled: orderId={}, userId={}", orderId, authenticatedUserId);
+    }
+
+    private void assertMatchingUser(Long authenticatedUserId, Long requestUserId) {
+        if (!authenticatedUserId.equals(requestUserId)) {
+            throw new AccessDeniedException("Request userId does not match authenticated user");
+        }
     }
 }

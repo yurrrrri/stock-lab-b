@@ -26,6 +26,7 @@ extra["springCloudVersion"] = "2023.0.1"
 dependencies {
     // Web & High Concurrency
     implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     
     // Data Persistence

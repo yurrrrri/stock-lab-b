@@ -1,20 +1,25 @@
 package com.stocklab.core.domain.matching.repository;
 
+import com.stocklab.core.domain.matching.orderbook.OrderBookLevel;
 import com.stocklab.core.domain.matching.orderbook.OrderBookMatchCandidate;
 import com.stocklab.core.domain.matching.orderbook.OrderBookPriceCodec;
+import com.stocklab.core.domain.matching.orderbook.OrderBookSnapshot;
 import com.stocklab.core.domain.order.Order;
 import com.stocklab.core.domain.order.OrderSide;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scripting.support.ResourceScriptSource;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 @RequiredArgsConstructor
@@ -52,6 +57,21 @@ public class OrderBookRedisRepository {
         if (Boolean.TRUE.equals(added)) {
             redisTemplate.opsForHash().put(qtyKey(stockCode), member, quantity.toPlainString());
         }
+    }
+
+    public Optional<BigDecimal> getBestOppositePrice(String stockCode, OrderSide orderSide) {
+        if (orderSide == OrderSide.BUY) {
+            return getBestPrice(sellKey(stockCode), false);
+        }
+        return getBestPrice(buyKey(stockCode), true);
+    }
+
+    public OrderBookSnapshot getSnapshot(String stockCode, int depth) {
+        return new OrderBookSnapshot(
+                stockCode,
+                getLevels(buyKey(stockCode), true, depth),
+                getLevels(sellKey(stockCode), false, depth)
+        );
     }
 
     public Optional<OrderBookMatchCandidate> findCrossingMatch(String stockCode) {
@@ -119,5 +139,49 @@ public class OrderBookRedisRepository {
 
     private String getBookKey(String stockCode, String orderSide) {
         return orderSide.equalsIgnoreCase("BUY") ? buyKey(stockCode) : sellKey(stockCode);
+    }
+
+    private Optional<BigDecimal> getBestPrice(String bookKey, boolean highestFirst) {
+        Set<ZSetOperations.TypedTuple<String>> entries = highestFirst
+                ? redisTemplate.opsForZSet().reverseRangeWithScores(bookKey, 0, 0)
+                : redisTemplate.opsForZSet().rangeWithScores(bookKey, 0, 0);
+
+        if (entries == null || entries.isEmpty()) {
+            return Optional.empty();
+        }
+
+        ZSetOperations.TypedTuple<String> entry = entries.iterator().next();
+        if (entry.getScore() == null) {
+            return Optional.empty();
+        }
+        return Optional.of(OrderBookPriceCodec.decode(entry.getScore()));
+    }
+
+    private List<OrderBookLevel> getLevels(String bookKey, boolean highestFirst, int depth) {
+        Set<ZSetOperations.TypedTuple<String>> entries = highestFirst
+                ? redisTemplate.opsForZSet().reverseRangeWithScores(bookKey, 0, depth - 1L)
+                : redisTemplate.opsForZSet().rangeWithScores(bookKey, 0, depth - 1L);
+
+        if (entries == null || entries.isEmpty()) {
+            return List.of();
+        }
+
+        String stockCode = extractStockCode(bookKey);
+        List<OrderBookLevel> levels = new ArrayList<>();
+        for (ZSetOperations.TypedTuple<String> entry : entries) {
+            if (entry.getValue() == null || entry.getScore() == null) {
+                continue;
+            }
+            Long orderId = Long.valueOf(entry.getValue());
+            BigDecimal price = OrderBookPriceCodec.decode(entry.getScore());
+            BigDecimal quantity = getRemainingQuantity(stockCode, orderId).orElse(BigDecimal.ZERO);
+            levels.add(new OrderBookLevel(orderId, price, quantity));
+        }
+        return levels;
+    }
+
+    private String extractStockCode(String bookKey) {
+        int lastColon = bookKey.lastIndexOf(':');
+        return bookKey.substring(lastColon + 1);
     }
 }

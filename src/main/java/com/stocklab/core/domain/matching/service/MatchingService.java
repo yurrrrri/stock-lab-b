@@ -1,5 +1,6 @@
 package com.stocklab.core.domain.matching.service;
 
+import com.stocklab.core.api.ws.ExecutionNotificationService;
 import com.stocklab.core.domain.matching.Execution;
 import com.stocklab.core.domain.matching.repository.ExecutionRepository;
 import com.stocklab.core.domain.matching.repository.OrderBookRedisRepository;
@@ -22,6 +23,7 @@ public class MatchingService {
     private final ExecutionRepository executionRepository;
     private final OrderBookRedisRepository orderBookRedisRepository;
     private final SettlementService settlementService;
+    private final ExecutionNotificationService executionNotificationService;
 
     @Transactional
     public void processMatch(String stockCode, Long buyOrderId, Long sellOrderId, BigDecimal matchPrice) {
@@ -66,7 +68,8 @@ public class MatchingService {
                 .executionQuantity(matchQuantity)
                 .build();
 
-        executionRepository.save(execution);
+        Execution savedExecution = executionRepository.save(execution);
+        executionNotificationService.publish(savedExecution);
 
         orderBookRedisRepository.syncOrderInBook(stockCode, buyOrder);
         orderBookRedisRepository.syncOrderInBook(stockCode, sellOrder);
